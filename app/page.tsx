@@ -72,10 +72,6 @@ export default function Home() {
                 </div>
               </section>
 
-              <div className="relative mb-4">
-                <ScanForm />
-                <div className="absolute inset-0 flex items-center justify-center rounded-2xl" style={{ background: 'linear-gradient(to bottom, transparent 0%, rgba(5,12,26,0.55) 100%)' }} />
-              </div>
             </div>
           </section>
 
@@ -192,13 +188,22 @@ export default function Home() {
 
           <section className="py-20 px-6 border-t border-slate-800/50">
             <div className="max-w-5xl mx-auto">
-              <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Recent Scans</h2>
+              <div className="text-center mb-10">
+                <h2 className="text-2xl font-bold text-white mb-3">Scan a Skill</h2>
+                <p className="text-slate-400 text-sm max-w-lg mx-auto">
+                  Paste a GitHub URL or skill name to run a full three-layer security analysis.
+                </p>
+              </div>
+              <div className="max-w-2xl mx-auto mb-14">
+                <ScanForm />
+              </div>
+              <div className="border-t border-slate-800/50 pt-10">
+                <div className="mb-8">
+                  <h3 className="text-lg font-semibold text-white">Recent Community Scans</h3>
                   <p className="text-slate-400 text-sm mt-1">Latest skills verified by the community</p>
                 </div>
+                <ScanHistory />
               </div>
-              <ScanHistory />
             </div>
           </section>
         </main>
