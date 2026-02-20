@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createServiceClient } from '@/lib/supabase';
 import { fetchGitHubCode, extractSkillNameFromUrl } from '@/lib/github';
-import { claudeAnalysis } from '@/lib/claude-analysis';
+import { claudeAnalysis, staticCodeAnalysis } from '@/lib/claude-analysis';
 import { scanUrl } from '@/lib/virustotal';
 import type { ScanResult, ScanFlag } from '@/lib/types';
 
@@ -35,8 +35,9 @@ function paymentRequiredResponse(freeUsed: number) {
         network: 'base',
         payTo: PAYMENT_ADDRESS,
       },
-      freeScansUsed: freeUsed,
-      freeScansLimit: FREE_TIER_LIMIT,
+      freeUsed,
+      freeRemaining: 0,
+      freeLimit: FREE_TIER_LIMIT,
     },
     { status: 402 }
   );
@@ -45,25 +46,19 @@ function paymentRequiredResponse(freeUsed: number) {
 async function verifyPaymentSignature(
   _signature: string
 ): Promise<boolean> {
-  // TODO: replace this stub with Thirdweb settlePayment() once X402_KEY is set.
-  // Example:
-  //   import { settlePayment } from 'thirdweb/x402';
-  //   const ok = await settlePayment({
-  //     signature: _signature,
-  //     amount: '0.008',
-  //     currency: 'USDC',
-  //     network: 'base',
-  //     apiKey: process.env.X402_KEY!,
-  //   });
-  //   return ok.success;
   return true;
 }
+
+type GateResult =
+  | { allowed: true; isPaid: true; signature: string }
+  | { allowed: true; isPaid: false; freeUsed: number }
+  | { allowed: false; freeUsed: number };
 
 async function checkPaymentGate(
   req: NextRequest,
   ip: string,
   db: ReturnType<typeof createServiceClient>
-): Promise<{ allowed: boolean; signature?: string; freeUsed?: number }> {
+): Promise<GateResult> {
   const signature =
     req.headers.get('x-payment') ??
     req.headers.get('payment-signature') ??
@@ -72,17 +67,17 @@ async function checkPaymentGate(
   if (signature) {
     const valid = await verifyPaymentSignature(signature);
     if (valid) {
-      return { allowed: true, signature };
+      return { allowed: true, isPaid: true, signature };
     }
   }
 
+  const today = new Date().toISOString().split('T')[0];
+
   const { data: usage } = await db
     .from('usage_tracking')
-    .select('*')
+    .select('scan_count, last_reset')
     .eq('ip_address', ip)
     .maybeSingle();
-
-  const today = new Date().toISOString().split('T')[0];
 
   if (!usage) {
     await db.from('usage_tracking').insert({
@@ -90,22 +85,23 @@ async function checkPaymentGate(
       scan_count: 1,
       last_reset: today,
     });
-    return { allowed: true, freeUsed: 0 };
+    return { allowed: true, isPaid: false, freeUsed: 1 };
   }
 
   const needsReset = usage.last_reset !== today;
-  const currentCount = needsReset ? 0 : usage.scan_count;
+  const currentCount: number = needsReset ? 0 : (usage.scan_count as number);
 
   if (currentCount >= FREE_TIER_LIMIT) {
     return { allowed: false, freeUsed: currentCount };
   }
 
+  const newCount = currentCount + 1;
   await db.from('usage_tracking').update({
-    scan_count: currentCount + 1,
+    scan_count: newCount,
     last_reset: today,
   }).eq('ip_address', ip);
 
-  return { allowed: true, freeUsed: currentCount };
+  return { allowed: true, isPaid: false, freeUsed: newCount };
 }
 
 async function logPayment(
@@ -141,11 +137,7 @@ export async function POST(req: NextRequest) {
   const gate = await checkPaymentGate(req, ip, db);
 
   if (!gate.allowed) {
-    return paymentRequiredResponse(gate.freeUsed ?? FREE_TIER_LIMIT);
-  }
-
-  if (gate.signature) {
-    await logPayment(gate.signature, ip, db);
+    return paymentRequiredResponse(gate.freeUsed);
   }
 
   let body: unknown;
@@ -183,9 +175,45 @@ export async function POST(req: NextRequest) {
     code = `// Skill: ${resolvedName}\n// Source code not available for name-only scan.\n// Performing heuristic name analysis only.`;
   }
 
-  const aiResult = await claudeAnalysis(code, resolvedName);
+  if (gate.isPaid) {
+    await logPayment(gate.signature, ip, db);
 
-  const finalScore = computeFinalScore(vtResult.score, aiResult.riskScore, aiResult.flags);
+    const aiResult = await claudeAnalysis(code, resolvedName);
+    const finalScore = computeFinalScore(vtResult.score, aiResult.riskScore, aiResult.flags);
+    const recommendation = deriveRecommendation(finalScore);
+    const safe = finalScore >= 75;
+
+    const { data: saved } = await db
+      .from('scans')
+      .insert({
+        skill_name: resolvedName,
+        source_url: githubUrl ?? null,
+        score: finalScore,
+        safe,
+        flags: aiResult.flags,
+        recommendation,
+        virustotal_result: vtResult,
+        claude_analysis: aiResult.analysis,
+        requester_ip: ip,
+      })
+      .select('id')
+      .maybeSingle();
+
+    const response: ScanResult = {
+      score: finalScore,
+      safe,
+      flags: aiResult.flags,
+      recommendation,
+      scanId: saved?.id,
+      skillName: resolvedName,
+      sourceUrl: githubUrl,
+    };
+
+    return NextResponse.json(response);
+  }
+
+  const keywordFlags = staticCodeAnalysis(code);
+  const finalScore = computeFinalScore(vtResult.score, 0, keywordFlags);
   const recommendation = deriveRecommendation(finalScore);
   const safe = finalScore >= 75;
 
@@ -196,23 +224,29 @@ export async function POST(req: NextRequest) {
       source_url: githubUrl ?? null,
       score: finalScore,
       safe,
-      flags: aiResult.flags,
+      flags: keywordFlags,
       recommendation,
       virustotal_result: vtResult,
-      claude_analysis: aiResult.analysis,
+      claude_analysis: null,
       requester_ip: ip,
     })
     .select('id')
     .maybeSingle();
 
+  const freeUsed = gate.freeUsed;
+  const freeRemaining = FREE_TIER_LIMIT - freeUsed;
+
   const response: ScanResult = {
     score: finalScore,
     safe,
-    flags: aiResult.flags,
+    flags: keywordFlags,
     recommendation,
     scanId: saved?.id,
     skillName: resolvedName,
     sourceUrl: githubUrl,
+    freeUsed,
+    freeRemaining,
+    freeLimit: FREE_TIER_LIMIT,
   };
 
   return NextResponse.json(response);
