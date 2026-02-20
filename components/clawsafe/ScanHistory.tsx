@@ -26,13 +26,11 @@ export function ScanHistory() {
 
   return (
     <div className="border-t border-slate-800/50 pt-10">
-      <div className="flex items-center justify-between gap-4 mb-8 flex-wrap">
-        <div>
-          <h3 className="text-lg font-semibold text-white">Recent Community Scans</h3>
-          <p className="text-slate-400 text-sm mt-1">Latest skills verified by the community</p>
-        </div>
+      <div className="mb-8">
+        <h3 className="text-lg font-semibold text-white">Recent Community Scans</h3>
+        <p className="text-slate-400 text-sm mt-1">Latest skills verified by the community</p>
         {!loading && scans.length === 0 && (
-          <span className="text-slate-500 text-sm">No scans yet. Be the first to verify a skill.</span>
+          <p className="text-slate-500 text-sm mt-1">No scans yet. Be the first to verify a skill.</p>
         )}
       </div>
       {loading ? (

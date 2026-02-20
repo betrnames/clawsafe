@@ -186,9 +186,12 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="py-20 px-6 border-t border-slate-800/50">
+          <section className="py-20 px-6 border-t border-slate-800/50 opacity-40 pointer-events-none select-none">
             <div className="max-w-5xl mx-auto">
               <div className="text-center mb-10">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/50 text-slate-500 text-xs font-medium mb-3">
+                  Coming Soon
+                </div>
                 <h2 className="text-2xl font-bold text-white mb-3">Scan a Skill</h2>
                 <p className="text-slate-400 text-sm max-w-lg mx-auto">
                   Paste a GitHub URL or skill name to run a full three-layer security analysis.
