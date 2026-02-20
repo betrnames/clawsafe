@@ -24,29 +24,30 @@ export function ScanHistory() {
     load();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="space-y-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-16 rounded-xl bg-slate-800/40 animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-
-  if (scans.length === 0) {
-    return (
-      <div className="text-center py-12 text-slate-500 text-sm">
-        No scans yet. Be the first to verify a skill.
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-3">
-      {scans.map((scan) => (
-        <ScanRow key={scan.id} scan={scan} />
-      ))}
+    <div className="border-t border-slate-800/50 pt-10">
+      <div className="flex items-center justify-between gap-4 mb-8 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Recent Community Scans</h3>
+          <p className="text-slate-400 text-sm mt-1">Latest skills verified by the community</p>
+        </div>
+        {!loading && scans.length === 0 && (
+          <span className="text-slate-500 text-sm">No scans yet. Be the first to verify a skill.</span>
+        )}
+      </div>
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-16 rounded-xl bg-slate-800/40 animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {scans.map((scan) => (
+            <ScanRow key={scan.id} scan={scan} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

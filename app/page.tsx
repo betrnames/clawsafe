@@ -197,13 +197,7 @@ export default function Home() {
               <div className="max-w-2xl mx-auto mb-14">
                 <ScanForm />
               </div>
-              <div className="border-t border-slate-800/50 pt-10">
-                <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-white">Recent Community Scans</h3>
-                  <p className="text-slate-400 text-sm mt-1">Latest skills verified by the community</p>
-                </div>
-                <ScanHistory />
-              </div>
+              <ScanHistory />
             </div>
           </section>
         </main>
