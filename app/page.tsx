@@ -13,7 +13,7 @@ export default function Home() {
         <header className="border-b border-slate-800/60 backdrop-blur-sm sticky top-0 z-50" style={{ backgroundColor: 'rgba(5, 12, 26, 0.85)' }}>
           <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Image src="/clawsafe.png" alt="ClawSafe Logo" width={32} height={32} className="rounded-sm" />
+              <Image src="/clawsafe.png" alt="ClawSafe Logo" width={36} height={36} />
               <span className="font-bold text-white text-lg tracking-tight">ClawSafe</span>
             </div>
             <nav className="hidden md:flex items-center gap-6 text-sm text-slate-400">
@@ -207,7 +207,7 @@ export default function Home() {
           <div className="max-w-6xl mx-auto">
             <div className="flex flex-col items-center gap-6">
               <div className="flex items-center gap-2.5">
-                <Image src="/clawsafe.png" alt="ClawSafe Logo" width={28} height={28} className="rounded-sm" />
+                <Image src="/clawsafe.png" alt="ClawSafe Logo" width={28} height={28} />
                 <span className="font-bold text-white">ClawSafe</span>
                 <span className="text-slate-600 text-sm">Skill Safety Verifier</span>
               </div>
