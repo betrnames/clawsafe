@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { Shield, Zap, Eye, CreditCard, CheckCircle, Github, ExternalLink } from 'lucide-react';
+
 import { ScanForm } from '@/components/clawsafe/ScanForm';
 import { ScanHistory } from '@/components/clawsafe/ScanHistory';
 import { WaitlistForm } from '@/components/clawsafe/WaitlistForm';
