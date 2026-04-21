@@ -41,7 +41,7 @@ export default function Home() {
               <div className="flex flex-col items-center gap-2 mb-6">
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sky-950/60 border border-sky-800/50 text-sky-400 text-xs font-medium">
                   <Zap className="w-3.5 h-3.5" />
-                  VirusTotal + AI-powered scanning
+                  VirusTotal + static analysis — x402 payments on Base
                 </div>
               </div>
 
@@ -97,7 +97,7 @@ export default function Home() {
                   step="02"
                   icon={<Eye className="w-5 h-5" />}
                   title="Deep Scan"
-                  description="We fetch the source code, run VirusTotal URL scanning, and apply AI pattern detection for 10+ threat categories."
+                  description="We fetch the source code, run VirusTotal URL scanning, and apply static pattern detection across 10+ threat categories."
                   color="cyan"
                 />
                 <StepCard
@@ -116,7 +116,7 @@ export default function Home() {
               <div className="text-center mb-12">
                 <h2 className="text-2xl font-bold text-white mb-3">What We Detect</h2>
                 <p className="text-slate-400 text-sm max-w-lg mx-auto">
-                  Static analysis + AI covers the most critical attack surfaces used in malicious skills.
+                  Static analysis covers the most critical attack surfaces used in malicious skills.
                 </p>
               </div>
 
@@ -159,8 +159,8 @@ export default function Home() {
                   features={[
                     'Everything in Free',
                     'Unlimited checks',
-                    'Automatic agent payments',
-                    'Priority analysis queue',
+                    'x402 autonomous agent payments',
+                    'No accounts or API keys needed',
                     'Full scan history retention',
                   ]}
                   cta="Join Waitlist"
@@ -187,12 +187,9 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="py-20 px-6 border-t border-slate-800/50 opacity-40 pointer-events-none select-none">
+          <section className="py-20 px-6 border-t border-slate-800/50">
             <div className="max-w-5xl mx-auto">
               <div className="text-center mb-10">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/50 text-slate-500 text-xs font-medium mb-3">
-                  Coming Soon
-                </div>
                 <h2 className="text-2xl font-bold text-white mb-3">Scan a Skill</h2>
                 <p className="text-slate-400 text-sm max-w-lg mx-auto">
                   Paste a GitHub URL or skill name to run a full three-layer security analysis.

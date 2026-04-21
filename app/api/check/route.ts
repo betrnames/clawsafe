@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { withX402 } from 'x402-next';
+import type { Resource } from 'x402/types';
 import { createServiceClient } from '@/lib/supabase';
 import { fetchGitHubCode, extractSkillNameFromUrl } from '@/lib/github';
-import { claudeAnalysis, staticCodeAnalysis } from '@/lib/claude-analysis';
+import { staticCodeAnalysis } from '@/lib/claude-analysis';
 import { scanUrl } from '@/lib/virustotal';
 import type { ScanResult, ScanFlag } from '@/lib/types';
 
 const FREE_TIER_LIMIT = parseInt(process.env.FREE_TIER_LIMIT ?? '3', 10);
-const PAYMENT_ADDRESS = process.env.X402_PAYMENT_ADDRESS ?? '0xPLACEHOLDER';
+const PAYMENT_ADDRESS = (process.env.X402_PAYMENT_ADDRESS ?? '0x0000000000000000000000000000000000000000') as `0x${string}`;
 
 const requestSchema = z.object({
   skillName: z.string().min(1).max(200).optional(),
@@ -24,53 +26,24 @@ function getRequesterIp(req: NextRequest): string {
   );
 }
 
-function paymentRequiredResponse(freeUsed: number) {
-  return NextResponse.json(
-    {
-      error: 'payment_required',
-      message: `Free tier exhausted (${FREE_TIER_LIMIT} checks/day). Send 0.008 USDC on Base and include the transaction signature in the X-Payment header.`,
-      payment: {
-        amount: '0.008',
-        currency: 'USDC',
-        network: 'base',
-        payTo: PAYMENT_ADDRESS,
-      },
-      freeUsed,
-      freeRemaining: 0,
-      freeLimit: FREE_TIER_LIMIT,
-    },
-    { status: 402 }
-  );
+function computeFinalScore(vtScore: number, flags: ScanFlag[]): number {
+  const criticalCount = flags.filter((f) => f.severity === 'critical').length;
+  const highCount = flags.filter((f) => f.severity === 'high').length;
+  const vtPenalty = Math.min(vtScore * 2, 40);
+  const flagPenalty = Math.min(criticalCount * 20 + highCount * 10, 40);
+  return Math.max(0, Math.min(100, Math.round(100 - vtPenalty - flagPenalty)));
 }
 
-async function verifyPaymentSignature(
-  _signature: string
-): Promise<boolean> {
-  return true;
+function deriveRecommendation(score: number): ScanResult['recommendation'] {
+  if (score >= 75) return 'Safe';
+  if (score >= 45) return 'Caution';
+  return 'Unsafe';
 }
 
-type GateResult =
-  | { allowed: true; isPaid: true; signature: string }
-  | { allowed: true; isPaid: false; freeUsed: number }
-  | { allowed: false; freeUsed: number };
-
-async function checkPaymentGate(
-  req: NextRequest,
+async function checkFreeTier(
   ip: string,
   db: ReturnType<typeof createServiceClient>
-): Promise<GateResult> {
-  const signature =
-    req.headers.get('x-payment') ??
-    req.headers.get('payment-signature') ??
-    req.headers.get('x-402-payment');
-
-  if (signature) {
-    const valid = await verifyPaymentSignature(signature);
-    if (valid) {
-      return { allowed: true, isPaid: true, signature };
-    }
-  }
-
+): Promise<{ allowed: boolean; freeUsed: number }> {
   const today = new Date().toISOString().split('T')[0];
 
   const { data: usage } = await db
@@ -80,12 +53,8 @@ async function checkPaymentGate(
     .maybeSingle();
 
   if (!usage) {
-    await db.from('usage_tracking').insert({
-      ip_address: ip,
-      scan_count: 1,
-      last_reset: today,
-    });
-    return { allowed: true, isPaid: false, freeUsed: 1 };
+    await db.from('usage_tracking').insert({ ip_address: ip, scan_count: 1, last_reset: today });
+    return { allowed: true, freeUsed: 1 };
   }
 
   const needsReset = usage.last_reset !== today;
@@ -96,49 +65,13 @@ async function checkPaymentGate(
   }
 
   const newCount = currentCount + 1;
-  await db.from('usage_tracking').update({
-    scan_count: newCount,
-    last_reset: today,
-  }).eq('ip_address', ip);
-
-  return { allowed: true, isPaid: false, freeUsed: newCount };
+  await db.from('usage_tracking').update({ scan_count: newCount, last_reset: today }).eq('ip_address', ip);
+  return { allowed: true, freeUsed: newCount };
 }
 
-async function logPayment(
-  signature: string,
-  ip: string,
-  db: ReturnType<typeof createServiceClient>
-) {
-  await db.from('payments').insert({ signature, ip_address: ip });
-}
-
-function computeFinalScore(vtScore: number, aiRiskScore: number, flags: ScanFlag[]): number {
-  const criticalCount = flags.filter((f) => f.severity === 'critical').length;
-  const highCount = flags.filter((f) => f.severity === 'high').length;
-
-  const vtPenalty = Math.min(vtScore * 2, 40);
-  const aiPenalty = Math.min(aiRiskScore * 0.4, 40);
-  const flagPenalty = Math.min(criticalCount * 20 + highCount * 10, 40);
-
-  const totalRisk = vtPenalty + aiPenalty + flagPenalty;
-  return Math.max(0, Math.min(100, Math.round(100 - totalRisk)));
-}
-
-function deriveRecommendation(score: number): ScanResult['recommendation'] {
-  if (score >= 75) return 'Safe';
-  if (score >= 45) return 'Caution';
-  return 'Unsafe';
-}
-
-export async function POST(req: NextRequest) {
+async function performScan(req: NextRequest): Promise<NextResponse> {
   const db = createServiceClient();
   const ip = getRequesterIp(req);
-
-  const gate = await checkPaymentGate(req, ip, db);
-
-  if (!gate.allowed) {
-    return paymentRequiredResponse(gate.freeUsed);
-  }
 
   let body: unknown;
   try {
@@ -153,7 +86,6 @@ export async function POST(req: NextRequest) {
   }
 
   const { skillName, githubUrl } = parsed.data;
-
   let code = '';
   let resolvedName = skillName ?? extractSkillNameFromUrl(githubUrl!);
   let vtResult = { malicious: 0, suspicious: 0, harmless: 72, undetected: 0, total: 72, score: 0 };
@@ -166,54 +98,16 @@ export async function POST(req: NextRequest) {
       const message = err instanceof Error ? err.message : 'Failed to fetch GitHub code.';
       return NextResponse.json({ error: message }, { status: 422 });
     }
-
     try {
       vtResult = await scanUrl(githubUrl);
     } catch {
     }
   } else {
-    code = `// Skill: ${resolvedName}\n// Source code not available for name-only scan.\n// Performing heuristic name analysis only.`;
+    code = `// Skill: ${resolvedName}\n// Source code not available for name-only scan.`;
   }
 
-  if (gate.isPaid) {
-    await logPayment(gate.signature, ip, db);
-
-    const aiResult = await claudeAnalysis(code, resolvedName);
-    const finalScore = computeFinalScore(vtResult.score, aiResult.riskScore, aiResult.flags);
-    const recommendation = deriveRecommendation(finalScore);
-    const safe = finalScore >= 75;
-
-    const { data: saved } = await db
-      .from('scans')
-      .insert({
-        skill_name: resolvedName,
-        source_url: githubUrl ?? null,
-        score: finalScore,
-        safe,
-        flags: aiResult.flags,
-        recommendation,
-        virustotal_result: vtResult,
-        claude_analysis: aiResult.analysis,
-        requester_ip: ip,
-      })
-      .select('id')
-      .maybeSingle();
-
-    const response: ScanResult = {
-      score: finalScore,
-      safe,
-      flags: aiResult.flags,
-      recommendation,
-      scanId: saved?.id,
-      skillName: resolvedName,
-      sourceUrl: githubUrl,
-    };
-
-    return NextResponse.json(response);
-  }
-
-  const keywordFlags = staticCodeAnalysis(code);
-  const finalScore = computeFinalScore(vtResult.score, 0, keywordFlags);
+  const flags = staticCodeAnalysis(code);
+  const finalScore = computeFinalScore(vtResult.score, flags);
   const recommendation = deriveRecommendation(finalScore);
   const safe = finalScore >= 75;
 
@@ -224,7 +118,7 @@ export async function POST(req: NextRequest) {
       source_url: githubUrl ?? null,
       score: finalScore,
       safe,
-      flags: keywordFlags,
+      flags,
       recommendation,
       virustotal_result: vtResult,
       claude_analysis: null,
@@ -233,21 +127,78 @@ export async function POST(req: NextRequest) {
     .select('id')
     .maybeSingle();
 
-  const freeUsed = gate.freeUsed;
-  const freeRemaining = FREE_TIER_LIMIT - freeUsed;
-
   const response: ScanResult = {
     score: finalScore,
     safe,
-    flags: keywordFlags,
+    flags,
     recommendation,
     scanId: saved?.id,
     skillName: resolvedName,
     sourceUrl: githubUrl,
-    freeUsed,
-    freeRemaining,
-    freeLimit: FREE_TIER_LIMIT,
   };
 
   return NextResponse.json(response);
+}
+
+const COINBASE_FACILITATOR = {
+  url: 'https://api.cdp.coinbase.com/platform/v2/x402' as Resource,
+};
+
+// Paid path: x402 middleware handles payment verification before the handler runs
+const paidScan = withX402(
+  performScan,
+  PAYMENT_ADDRESS,
+  {
+    price: '$0.008',
+    network: 'base',
+    config: { description: 'ClawSafe skill security scan — 0.008 USDC on Base' },
+  },
+  COINBASE_FACILITATOR
+);
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const db = createServiceClient();
+  const ip = getRequesterIp(req);
+
+  // x402-compliant clients send X-PAYMENT header; route them to the paid path
+  const hasPaymentHeader =
+    req.headers.has('x-payment') ||
+    req.headers.has('payment-signature') ||
+    req.headers.has('x-402-payment');
+
+  if (hasPaymentHeader) {
+    return paidScan(req) as Promise<NextResponse>;
+  }
+
+  // Free tier path: enforce daily limit
+  const gate = await checkFreeTier(ip, db);
+  if (!gate.allowed) {
+    return NextResponse.json(
+      {
+        error: 'payment_required',
+        message: `Free tier exhausted (${FREE_TIER_LIMIT} checks/day). Send X-PAYMENT header with 0.008 USDC on Base.`,
+        payment: {
+          amount: '0.008',
+          currency: 'USDC',
+          network: 'base',
+          payTo: PAYMENT_ADDRESS,
+        },
+        freeUsed: gate.freeUsed,
+        freeRemaining: 0,
+        freeLimit: FREE_TIER_LIMIT,
+      },
+      { status: 402 }
+    );
+  }
+
+  const result = await performScan(req);
+  if (result.status !== 200) return result;
+
+  const data = await result.json() as ScanResult;
+  return NextResponse.json({
+    ...data,
+    freeUsed: gate.freeUsed,
+    freeRemaining: FREE_TIER_LIMIT - gate.freeUsed,
+    freeLimit: FREE_TIER_LIMIT,
+  });
 }

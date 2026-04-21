@@ -1,11 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { ScanFlag } from './types';
-
-interface AnalysisResult {
-  flags: ScanFlag[];
-  riskScore: number;
-  analysis: string;
-}
 
 const STATIC_PATTERNS: Array<{
   pattern: RegExp;
@@ -42,77 +35,4 @@ export function staticCodeAnalysis(code: string): ScanFlag[] {
   }
 
   return flags;
-}
-
-export async function claudeAnalysis(code: string, skillName: string): Promise<AnalysisResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey || apiKey === 'YOUR_ANTHROPIC_API_KEY_HERE') {
-    const flags = staticCodeAnalysis(code);
-    const riskScore = flags.reduce((acc, f) => {
-      const weights = { critical: 30, high: 20, medium: 10, low: 5 };
-      return acc + (weights[f.severity] ?? 5);
-    }, 0);
-    return { flags, riskScore, analysis: 'Static analysis only (AI key not configured).' };
-  }
-
-  const client = new Anthropic({ apiKey });
-
-  const prompt = `You are a security auditor reviewing code for a skill named "${skillName}".
-
-Analyze the following source code for security threats. Look for:
-1. Wallet drain / unauthorized transactions
-2. Private key or seed phrase extraction
-3. Shell injection (child_process, exec, spawn)
-4. Data exfiltration (sending data to external servers)
-5. Code injection (eval, Function constructor)
-6. File system abuse
-7. Obfuscation techniques
-8. Environment variable harvesting
-9. Suspicious network calls
-10. Storage/cookie access
-
-Return ONLY valid JSON matching this schema:
-{
-  "riskScore": <0-100 integer>,
-  "flags": [
-    {
-      "id": "<unique-slug>",
-      "category": "<category-slug>",
-      "severity": "critical" | "high" | "medium" | "low",
-      "description": "<one sentence>",
-      "line": <optional line number>
-    }
-  ],
-  "analysis": "<2-3 sentence overall summary>"
-}
-
-SOURCE CODE:
-\`\`\`
-${code.slice(0, 30_000)}
-\`\`\``;
-
-  try {
-    const message = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const content = message.content[0];
-    if (content.type !== 'text') throw new Error('Unexpected response type');
-
-    const jsonMatch = content.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON in response');
-
-    const parsed = JSON.parse(jsonMatch[0]) as AnalysisResult;
-    return parsed;
-  } catch {
-    const flags = staticCodeAnalysis(code);
-    const riskScore = flags.reduce((acc, f) => {
-      const weights = { critical: 30, high: 20, medium: 10, low: 5 };
-      return acc + (weights[f.severity] ?? 5);
-    }, 0);
-    return { flags, riskScore, analysis: 'AI analysis failed; static analysis results used.' };
-  }
 }
